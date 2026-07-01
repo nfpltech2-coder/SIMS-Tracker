@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables from the directory next to the exe
 if getattr(sys, 'frozen', False):
-    _env_dir = Path(sys.executable).resolve().parent
+    _env_dir = Path(sys._MEIPASS)
 else:
     _env_dir = Path(__file__).resolve().parent
 load_dotenv(_env_dir / ".env")
@@ -267,10 +267,13 @@ class ShaktiCreatorAPI:
             logger.error(f"Pre-Alert lookup failed: {e}")
             return None
 
-    def get_skoda_user_by_mbl(self, mbl: str) -> Optional[str]:
-        """Fetch Skoda_User from Pre-Alert using MBL."""
+    def get_skoda_user_by_mbl(self, mbl: str) -> tuple[Optional[str], str]:
+        """Fetch Skoda_User from Pre-Alert using MBL.
+        Returns (skoda_user, error_reason). error_reason is empty on success.
+        """
         if not self.ensure_valid_token():
-            return None
+            logger.error("Skoda User lookup failed: Auth token refresh failed.")
+            return None, "AUTH_FAILED: Could not authenticate with Shakti. Check .env credentials."
         
         url = (f"https://{self.api_domain}/api/v2/{self.account_owner}/{self.app_link_name}"
                f"/report/{self.pre_alert_report}?criteria=(MAWB_MBL == \"{mbl}\")")
@@ -278,19 +281,32 @@ class ShaktiCreatorAPI:
         
         try:
             response = requests.get(url, headers=headers)
+            logger.info(f"Skoda User by MBL '{mbl}': HTTP {response.status_code}")
             if response.status_code == 200:
                 data_list = response.json().get('data', [])
                 if data_list and len(data_list) > 0:
-                    return data_list[0].get('Skoda_User', '')
-            return None
+                    raw_value = data_list[0].get('Skoda_User')
+                    user = str(raw_value).strip() if raw_value else ""
+                    logger.info(f"Skoda User raw value: {repr(raw_value)} -> '{user}'")
+                    if user:
+                        return user, ""
+                    return None, "EMPTY_FIELD: Pre-Alert record found but Skoda_User field is blank."
+                return None, f"NO_RECORD: No Pre-Alert record found for MBL '{mbl}'."
+            elif response.status_code == 401:
+                return None, "AUTH_EXPIRED: Shakti token expired or invalid. Restart the app."
+            else:
+                return None, f"API_ERROR: Shakti returned HTTP {response.status_code}."
         except Exception as e:
             logger.error(f"Skoda User lookup failed: {e}")
-            return None
+            return None, f"NETWORK_ERROR: {e}"
 
-    def get_skoda_user_by_job_no(self, job_no: str) -> Optional[str]:
-        """Fetch Skoda_User from Pre-Alert using Job_No."""
+    def get_skoda_user_by_job_no(self, job_no: str) -> tuple[Optional[str], str]:
+        """Fetch Skoda_User from Pre-Alert using Job_No.
+        Returns (skoda_user, error_reason). error_reason is empty on success.
+        """
         if not self.ensure_valid_token():
-            return None
+            logger.error("Skoda User lookup failed: Auth token refresh failed.")
+            return None, "AUTH_FAILED: Could not authenticate with Shakti. Check .env credentials."
         
         url = (f"https://{self.api_domain}/api/v2/{self.account_owner}/{self.app_link_name}"
                f"/report/{self.pre_alert_report}?criteria=(Job_No == {job_no})")
@@ -298,14 +314,24 @@ class ShaktiCreatorAPI:
         
         try:
             response = requests.get(url, headers=headers)
+            logger.info(f"Skoda User by Job '{job_no}': HTTP {response.status_code}")
             if response.status_code == 200:
                 data_list = response.json().get('data', [])
                 if data_list and len(data_list) > 0:
-                    return data_list[0].get('Skoda_User', '')
-            return None
+                    raw_value = data_list[0].get('Skoda_User')
+                    user = str(raw_value).strip() if raw_value else ""
+                    logger.info(f"Skoda User raw value: {repr(raw_value)} -> '{user}'")
+                    if user:
+                        return user, ""
+                    return None, "EMPTY_FIELD: Pre-Alert record found but Skoda_User field is blank."
+                return None, f"NO_RECORD: No Pre-Alert record found for Job No '{job_no}'."
+            elif response.status_code == 401:
+                return None, "AUTH_EXPIRED: Shakti token expired or invalid. Restart the app."
+            else:
+                return None, f"API_ERROR: Shakti returned HTTP {response.status_code}."
         except Exception as e:
             logger.error(f"Skoda User lookup failed: {e}")
-            return None
+            return None, f"NETWORK_ERROR: {e}"
 
     def update_pre_alert_job_no(self, pre_alert_id: str, job_no: str) -> tuple[bool, str]:
         """Update the Job_No field on a Book Pre-Alert record."""
