@@ -1,9 +1,17 @@
 import os
 import sys
+import logging
 import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
 from dotenv import load_dotenv
+
+# Configure logging (console only — no file created)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler()]
+)
 
 try:
     from zoho_api import ShaktiCreatorAPI
