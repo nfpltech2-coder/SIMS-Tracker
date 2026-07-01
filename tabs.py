@@ -10,7 +10,7 @@ from datetime import datetime
 
 from tracker_logic import process_tracker_files
 from extractor_logic import run_extraction
-from matcher_logic import match_csv_with_sims, build_check1_payload, build_check2_payload, create_logisys_csv
+from matcher_logic import match_csv_with_sims, build_check1_payload, build_check2_payload, create_logisys_csv, clean_cth
 
 TEXT_LIGHT = "#666666"
 BRAND_BLUE = "#0056b3"
@@ -250,10 +250,10 @@ def _run_tab1(app):
         skoda_user = ""
         if app.api:
             app.root.after(0, lambda: app.tab1_method_display.set("Method: Fetching from Shakti..."))
-            skoda_user = app.api.get_skoda_user_by_mbl(mbl)
+            skoda_user, reason = app.api.get_skoda_user_by_mbl(mbl)
             if not skoda_user:
-                app.root.after(0, lambda: messagebox.showerror("Error", "Skoda User is empty in Shakti for this MBL. Cannot proceed."))
-                app.root.after(0, lambda: app.tab1_status.set("Failed: Skoda User is empty."))
+                app.root.after(0, lambda r=reason: messagebox.showerror("Error", f"Cannot proceed.\n\n{r}"))
+                app.root.after(0, lambda r=reason: app.tab1_status.set(f"Failed: {r.split(':')[0]}"))
                 app.root.after(0, lambda: app.btn_tab1.config(state="normal"))
                 return
             if skoda_user in ["Ranjit (PUNE)", "Ashish (CSN)"]:
@@ -638,11 +638,11 @@ def _match_c1(app):
             method = "item"
             skoda_user = ""
             if app.api and job:
-                skoda_user = app.api.get_skoda_user_by_job_no(job)
+                skoda_user, reason = app.api.get_skoda_user_by_job_no(job)
                 if not skoda_user:
-                    app.root.after(0, lambda: messagebox.showerror("Error", "Skoda User is empty in Shakti. Cannot proceed."))
+                    app.root.after(0, lambda r=reason: messagebox.showerror("Error", f"Cannot proceed.\n\n{r}"))
                     app.root.after(0, lambda: app.btn_c1_match.config(state="normal"))
-                    app.root.after(0, lambda: app.c1_status.set("Failed: Skoda User is empty."))
+                    app.root.after(0, lambda r=reason: app.c1_status.set(f"Failed: {r.split(':')[0]}"))
                     return
                 if skoda_user in ["Ranjit (PUNE)", "Ashish (CSN)"]:
                     method = "hs"
@@ -665,7 +665,7 @@ def _match_c1(app):
                         unique_data = []
                         seen_cth = set()
                         for item in data:
-                            cth = str(item["cth"]).strip()
+                            cth = clean_cth(item["cth"])
                             if cth not in seen_cth:
                                 seen_cth.add(cth)
                                 unique_data.append(item)
@@ -991,10 +991,10 @@ def _match_c2(app):
             method = "item"
             skoda_user = ""
             if app.api and job:
-                skoda_user = app.api.get_skoda_user_by_job_no(job)
+                skoda_user, reason = app.api.get_skoda_user_by_job_no(job)
                 if not skoda_user:
-                    app.root.after(0, lambda: messagebox.showerror("Error", "Skoda User is empty in Shakti. Cannot proceed."))
-                    app.root.after(0, lambda: app.c2_status.set("Failed: Skoda User is empty."))
+                    app.root.after(0, lambda r=reason: messagebox.showerror("Error", f"Cannot proceed.\n\n{r}"))
+                    app.root.after(0, lambda r=reason: app.c2_status.set(f"Failed: {r.split(':')[0]}"))
                     return
                 if skoda_user in ["Ranjit (PUNE)", "Ashish (CSN)"]:
                     method = "hs"
@@ -1017,7 +1017,7 @@ def _match_c2(app):
                         unique_data = []
                         seen_cth = set()
                         for item in data:
-                            cth = str(item["cth"]).strip()
+                            cth = clean_cth(item["cth"])
                             if cth not in seen_cth:
                                 seen_cth.add(cth)
                                 unique_data.append(item)
