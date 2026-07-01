@@ -22,6 +22,13 @@ def clean_excel_formula(val):
         return s[2:-1]
     return val
 
+def clean_cth(val) -> str:
+    """Cleans a CTH value for robust matching by removing spaces, dots, and trailing '.0'."""
+    s = str(val).strip().replace(' ', '')
+    if s.endswith('.0'):
+        s = s[:-2]
+    return s.replace('.', '')
+
 def match_csv_with_sims(
     csv_path: str,
     sims_path: str,
@@ -47,7 +54,7 @@ def match_csv_with_sims(
 
     # Build merged key for CSV: CTH/SQC_Qty (Divide by 1000 to match SIMS MT) or just CTH for HS
     def calc_csv_merged(row):
-        cth = str(row.get('CTH', '')).strip().split('.')[0]
+        cth = clean_cth(row.get('CTH', ''))
         if is_hs:
             return cth
         raw_qty = row.get('SQC_Qty', 0)
@@ -64,11 +71,17 @@ def match_csv_with_sims(
     all_sims = []
     for _, r in df_sims.iterrows():
         # SIMS Extracted Excel typically names the CTH column 'HS Code'
-        cth_sims = str(r.get('HS Code', r.get('CTH', ''))).strip().split('.')[0]
+        cth_sims = clean_cth(r.get('HS Code', r.get('CTH', '')))
         if is_hs:
             key = cth_sims
         else:
-            key = str(r.get('Merged to Compare', '')).strip()
+            # Normalize the key from Merged to Compare (clean the CTH part before '/')
+            raw_key = str(r.get('Merged to Compare', '')).strip()
+            if '/' in raw_key:
+                parts = raw_key.split('/')
+                key = f"{clean_cth(parts[0])}/{parts[1]}"
+            else:
+                key = raw_key
             
         sim = str(r.get('SIM Number', '')).strip()
         raw_date = r.get('SIMS Date')
@@ -203,26 +216,7 @@ def create_logisys_csv(input_csv_path: str, output_path: str, display_data: List
     """
     from collections import defaultdict
 
-    if is_hs:
-        # HS Method: build one row per unique CTH with its assigned SIMS code
-        rows = []
-        seen_cth = set()
-        for d in display_data:
-            cth = str(d.get("cth", "")).strip().split('.')[0]
-            if cth in seen_cth:
-                continue
-            seen_cth.add(cth)
-            sim = str(d.get("sim", "")).strip()
-            rows.append({
-                "CTH": cth,
-                "SIMS Code": sim,
-                "SIMS Category": "SIUNAPL" if sim else "",
-            })
-        df_out = pd.DataFrame(rows, columns=["CTH", "SIMS Code", "SIMS Category"])
-        df_out.to_csv(output_path, index=False)
-        return output_path
-
-    # Item Method: enrich the original CSV with SIMS Code and SIMS Category
+    # Enrich the original CSV with SIMS Code and SIMS Category
     # Use auto-delimiter detection to keep all original columns (e.g. BRAND)
     df_orig = None
     for sep in [',', ';', '\t']:
@@ -236,36 +230,54 @@ def create_logisys_csv(input_csv_path: str, output_path: str, display_data: List
     if df_orig is None:
         df_orig = pd.read_csv(input_csv_path, keep_default_na=False, low_memory=False)
 
-    # Create a queue-based mapping dictionary using the exact 'Merged to Compare' logic
-    sims_mapping = defaultdict(list)
-    for d in display_data:
-        if d.get("sim"):
-            cth = str(d.get("cth", "")).strip().split('.')[0]
-            raw_qty = d.get("sqc_qty", 0)
+    if is_hs:
+        # HS Method: Map CTH -> SIMS Code
+        sims_mapping = {}
+        for d in display_data:
+            if d.get("sim"):
+                cth = clean_cth(d.get("cth", ""))
+                sims_mapping[cth] = d["sim"]
+
+        def assign_sims_hs(row):
+            cth_str = str(row.get('CTH', '')).strip()
+            if not cth_str.startswith(('72', '73', '86')):
+                return ""
+            cth = clean_cth(cth_str)
+            return sims_mapping.get(cth, "")
+
+        df_orig['SIMS Code'] = df_orig.apply(assign_sims_hs, axis=1)
+    else:
+        # Item Method: Create a queue-based mapping dictionary using the exact 'Merged to Compare' logic
+        sims_mapping = defaultdict(list)
+        for d in display_data:
+            if d.get("sim"):
+                cth = clean_cth(d.get("cth", ""))
+                raw_qty = d.get("sqc_qty", 0)
+                try:
+                    processed_qty = float(str(raw_qty).replace(',', '')) / 1000
+                except (ValueError, TypeError):
+                    processed_qty = raw_qty
+                merged_key = f"{cth}/{format_qty_for_merge(processed_qty)}"
+                sims_mapping[merged_key].append(d["sim"])
+
+        # Assign SIMS Code row-by-row to consume the queue
+        def assign_sims_item(row):
+            cth_str = str(row.get('CTH', '')).strip()
+            if not cth_str.startswith(('72', '73', '86')):
+                return ""
+            cth = clean_cth(cth_str)
+            raw_qty = row.get('SQC_Qty', 0)
             try:
                 processed_qty = float(str(raw_qty).replace(',', '')) / 1000
             except (ValueError, TypeError):
                 processed_qty = raw_qty
             merged_key = f"{cth}/{format_qty_for_merge(processed_qty)}"
-            sims_mapping[merged_key].append(d["sim"])
-
-    # Assign SIMS Code row-by-row to consume the queue
-    def assign_sims(row):
-        cth_str = str(row.get('CTH', '')).strip()
-        if not cth_str.startswith(('72', '73', '86')):
+            if merged_key in sims_mapping and sims_mapping[merged_key]:
+                return sims_mapping[merged_key].pop(0)
             return ""
-        cth = cth_str.split('.')[0]
-        raw_qty = row.get('SQC_Qty', 0)
-        try:
-            processed_qty = float(str(raw_qty).replace(',', '')) / 1000
-        except (ValueError, TypeError):
-            processed_qty = raw_qty
-        merged_key = f"{cth}/{format_qty_for_merge(processed_qty)}"
-        if merged_key in sims_mapping and sims_mapping[merged_key]:
-            return sims_mapping[merged_key].pop(0)
-        return ""
 
-    df_orig['SIMS Code'] = df_orig.apply(assign_sims, axis=1)
+        df_orig['SIMS Code'] = df_orig.apply(assign_sims_item, axis=1)
+
     df_orig['SIMS Category'] = df_orig['SIMS Code'].apply(lambda x: "SIUNAPL" if str(x).strip() else "")
 
     df_orig.to_csv(output_path, index=False)
