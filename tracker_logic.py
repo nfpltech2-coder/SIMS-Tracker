@@ -162,7 +162,8 @@ def process_tracker_files(job_no, master_path, invoice_path, output_dir, update_
             'Aluminium': [],   # Prefix 76
             'Perfumery': [],    # Prefix 33
             'Tyre': [],
-            'Radar Radiance': []
+            'Radar Radiance': [],
+            'Camera': []       # Prefix 8525
         }
         
         csv_items = []
@@ -183,6 +184,8 @@ def process_tracker_files(job_no, master_path, invoice_path, output_dir, update_
                 sheet_dict['Tyre'].append(row)
             elif prefix_4 == '8526':
                 sheet_dict['Radar Radiance'].append(row)
+            elif prefix_4 == '8525':
+                sheet_dict['Camera'].append(row)
             elif prefix_2 in ['72', '73', '86']:
                 sheet_dict['Sheet1'].append(row)
                 csv_items.append(row)

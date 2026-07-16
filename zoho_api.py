@@ -367,7 +367,7 @@ class ShaktiCreatorAPI:
             return False, str(e)
 
     def create_job_with_pre_alert(self, job_no: str, mbl: str, missing_items: list) -> tuple[bool, str]:
-        """Update Pre-Alert Job_No and push Missing Items to SIMS Tracker."""
+        """Update Pre-Alert Job_No if empty, otherwise verify it matches job_no, and push Missing Items to SIMS Tracker."""
         if not self.is_configured():
             return False, "Shakti credentials not configured."
         if not self.ensure_valid_token():
@@ -376,7 +376,7 @@ class ShaktiCreatorAPI:
         if not mbl:
             return False, "MBL is required."
         
-        # --- STEP 1: Find Pre-Alert by MBL and check for duplicate Job_No ---
+        # --- STEP 1: Find Pre-Alert by MBL and check/verify Job_No ---
         pre_alert_id = self.find_pre_alert_by_mbl(mbl)
         if not pre_alert_id:
             return False, f"No Pre-Alert record found with MBL: {mbl}"
@@ -384,17 +384,20 @@ class ShaktiCreatorAPI:
         # Check if Pre-Alert already has a Job_No
         existing_job = self._get_pre_alert_job_no(pre_alert_id)
         if existing_job:
-            return False, f"MBL {mbl} already has Job Number '{existing_job}' in Pre-Alert. Cannot override."
-        
-        # --- STEP 2: Update Job_No on Pre-Alert ---
-        pa_ok, pa_msg = self.update_pre_alert_job_no(pre_alert_id, job_no)
-        if not pa_ok:
-            return False, f"Failed to update Pre-Alert: {pa_msg}"
+            # Verify that the existing Job Number matches the user input
+            if str(existing_job).strip() != str(job_no).strip():
+                return False, f"MBL {mbl} already has Job Number '{existing_job}' in Pre-Alert, but you entered '{job_no}'."
+            logger.info(f"Job Number '{job_no}' matches existing Pre-Alert Job Number. Skipping update step.")
+        else:
+            # --- STEP 2: Update Job_No on Pre-Alert (Fallback for backward compatibility if empty) ---
+            pa_ok, pa_msg = self.update_pre_alert_job_no(pre_alert_id, job_no)
+            if not pa_ok:
+                return False, f"Failed to update Pre-Alert: {pa_msg}"
         
         # --- STEP 3: Find SIMS Tracker record linked to this MBL ---
         record_id, _ = self._find_sims_record_by_mbl(mbl)
         if not record_id:
-            return False, f"Pre-Alert updated but no SIMS Tracker record found for MBL: {mbl}"
+            return False, f"Pre-Alert verified but no SIMS Tracker record found for MBL: {mbl}"
         
         # --- STEP 4: Push only Missing Items + Status to SIMS Tracker (NO Job_Number) ---
         url = (f"https://{self.api_domain}/api/v2/{self.account_owner}/{self.app_link_name}"
@@ -418,7 +421,7 @@ class ShaktiCreatorAPI:
             code = str(resp_data.get('code', ''))
             msg = resp_data.get('message', '')
             if code == "3000" or "Updated Successfully" in msg:
-                return True, f"Job {job_no} → Pre-Alert updated & items pushed to SIMS Tracker!"
+                return True, f"Job {job_no} → Pre-Alert verified & items pushed to SIMS Tracker!"
             return False, f"SIMS Tracker update failed: {msg if msg else 'Code ' + code}"
         except Exception as e:
             return False, f"Network error: {e}"

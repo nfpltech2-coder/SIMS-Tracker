@@ -122,12 +122,25 @@ def extract_payment_slip_data(path: str) -> Dict[str, any]:
             for page in pdf.pages:
                 text += (page.extract_text() or "") + "\n"
         
-        # Regex patterns based on E-Acknowledgement format
+        # 1. Extract Amount
+        amount = 0.0
+        # Layout A: E-Acknowledgement format (e.g. "Amount 750.00")
         amt_match = re.search(r"Amount\s+([\d\.]+)", text, re.IGNORECASE)
-        date_match = re.search(r"Transaction Date\s+(\d{2}-\d{2}-\d{4})", text, re.IGNORECASE)
+        if amt_match:
+            amount = float(amt_match.group(1).strip())
+        else:
+            # Layout B: Bharatkosh format (e.g. "sum of INR 3000" or just "INR 3000")
+            bk_amt_match = re.search(r"sum of INR\s*([\d\.,]+)", text, re.IGNORECASE)
+            if not bk_amt_match:
+                bk_amt_match = re.search(r"INR\s*([\d\.,]+)", text, re.IGNORECASE)
+            if bk_amt_match:
+                amount_str = bk_amt_match.group(1).replace(",", "").strip()
+                amount = float(amount_str)
         
-        amount = float(amt_match.group(1).strip()) if amt_match else 0.0
+        # 2. Extract Date
         date_str = "Not Found"
+        # Layout A: E-Acknowledgement format (e.g. "Transaction Date 12-05-2026")
+        date_match = re.search(r"Transaction Date\s+(\d{2}-\d{2}-\d{4})", text, re.IGNORECASE)
         if date_match:
             try:
                 raw_date = date_match.group(1).strip()
@@ -135,6 +148,16 @@ def extract_payment_slip_data(path: str) -> Dict[str, any]:
                 date_str = dt.strftime("%d-%b-%Y").upper() # e.g. 12-MAY-2026
             except:
                 date_str = date_match.group(1).strip()
+        else:
+            # Layout B: Bharatkosh format (e.g. "Dated: Jul 7 2026" or "Dated Jul 7 2026")
+            bk_date_match = re.search(r"Dated:?\s*([A-Za-z]{3}\s+\d{1,2}\s+\d{4})", text, re.IGNORECASE)
+            if bk_date_match:
+                try:
+                    raw_date = re.sub(r'\s+', ' ', bk_date_match.group(1)).strip()
+                    dt = datetime.strptime(raw_date, "%b %d %Y")
+                    date_str = dt.strftime("%d-%b-%Y").upper()
+                except:
+                    date_str = bk_date_match.group(1).strip()
         
         return {
             "Amount": amount,
